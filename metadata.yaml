@@ -1,8 +1,16 @@
 # Copyright 2020 Canonical Ltd.
 # See LICENSE file for licensing details.
 name: graylog
-description: |
-  Kubernetes charm for Graylog as part of the LMA stack.
 summary: |
+  Kubernetes charm for Graylog. 
+tags:
+  - observability
+  - lma
+  - graylog
+  - logs
+description: |
   Graylog will ingest logs and feed the data to Elasticsearch.
-series: [kubernetes]
+  Graylog _must_ have an Elasticsearch and Mongodb relation in
+  order to function properly.
+series:
+  - kubernetes
