@@ -12,6 +12,7 @@ from ops.model import ActiveStatus, MaintenanceStatus, BlockedStatus
 from ops.framework import StoredState
 
 logger = logging.getLogger(__name__)
+DOCKER_IMAGE = 'graylog/graylog:3.3.8-1'
 
 
 class GraylogCharm(CharmBase):
