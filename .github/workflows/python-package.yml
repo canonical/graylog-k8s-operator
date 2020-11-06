@@ -32,4 +32,5 @@ jobs:
         pip install -r requirements-dev.txt
     - name: Test
       run: |
+        ls -l
         bash run_test
