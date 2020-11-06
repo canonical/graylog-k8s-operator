@@ -26,6 +26,3 @@ class TestCharm(unittest.TestCase):
         actual_port = spec['containers'][0]['ports'][0]['containerPort']
         self.assertEqual(expected_port, actual_port)
 
-
-    def test_pod_spec_for_non_leader(self):
-        self.harness.set_leader(False)
