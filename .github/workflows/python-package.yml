@@ -30,6 +30,6 @@ jobs:
         virtualenv -p python3 venv
         source venv/bin/activate
         pip install -r requirements-dev.txt
-    - name: Tes
+    - name: Test
       run: |
-        ./run_test
+        bash run_test
