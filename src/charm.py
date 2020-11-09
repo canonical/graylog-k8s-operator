@@ -26,12 +26,51 @@ class GraylogCharm(CharmBase):
         # event observations
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.stop, self._on_stop)
+        self.framework.observe(
+            self.on['elasticsearch'].relation_changed,
+            self._on_elasticsearch_relation_changed
+        )
+
+        # initialized stored variables
+        # TODO: test whether we can just pass the {ingress-address}:{port} string
+        #       from Elasticsearch to Graylog or if we need to send multiple hosts
+        #       Hypothesis: just the ingress is fine
+        self._stored.set_default(elasticsearch_uri=str)  # connection str for elasticsearch
+
+    @property
+    def has_elasticsearch(self):
+        if self._stored.elasticsearch:
+            return True
+        else:
+            return False
 
     def _on_config_changed(self, _):
         self._configure_pod()
 
-    def _on_stop(self, event):
-        self.unit.status = MaintenanceStatus('Pod is terminating')
+    def _on_stop(self, _):
+        self.unit.status = MaintenanceStatus('Pod is terminating.')
+
+    def _on_elasticsearch_relation_changed(self, event):
+        """Get the relation data from the relation and save to stored variable."""
+        # skip if unit is not leader
+        if not self.unit.is_leader():
+            return
+
+        data = event.relation.data[event.unit]
+        ingress_address = data.get('ingress-address')
+        port = data.get('port')
+        if ingress_address is None or port is None:
+            logger.warning('No port or ingress-address in Elasticsearch relation data')
+            return
+
+        # if we have the data we need, get the information
+        self._stored.elasticsearch_uri = 'http://{}:{}'.format(
+            ingress_address,
+            port,
+        )
+
+        # configure the pod spec
+        self._configure_pod()
 
     def _build_pod_spec(self):
         config = self.model.config
@@ -61,12 +100,17 @@ class GraylogCharm(CharmBase):
                         'path': 'server.conf',
                         'content': textwrap.dedent("""\
                             is_master = true
-                            password_secret = admin
-                            """)
+                            password_secret = {}
+                            elasticsearch_hosts = {}
+                            """.format(
+                                config['admin-password'],
+                                self._stored.elasticsearch_uri,
+                        ))
                     }],
                 }],
             }]
         }
+
         return spec
 
     def _configure_pod(self):
