@@ -18,6 +18,9 @@ requires:
   elasticsearch:
     interface: elasticsearch-datastore
     limit: 1
+  mongodb:
+    interface: mongodb
+    limit: 1
 resources:
     graylog-image:
         type: oci-image
