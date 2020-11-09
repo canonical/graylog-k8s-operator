@@ -17,6 +17,7 @@ series:
 requires:
   elasticsearch:
     interface: elasticsearch-datastore
+    limit: 1
 resources:
     graylog-image:
         type: oci-image
