@@ -34,7 +34,12 @@ class GraylogCharm(CharmBase):
             self.on['elasticsearch'].relation_broken,
             self._on_elasticsearch_relation_broken
         )
-
+        self.framework.observe(
+            self.on["mongodb"].relation_changed, self._on_mongodb_relation_changed
+        )
+        self.framework.observe(
+            self.on["mongodb"].relation_broken, self._on_mongodb_relation_broken
+        )
         # initialized stored variables
         # TODO: test whether we can just pass the {ingress-address}:{port} string
         #       from Elasticsearch to Graylog or if we need to send multiple hosts
@@ -79,6 +84,30 @@ class GraylogCharm(CharmBase):
     def _on_elasticsearch_relation_broken(self, _):
         """If the relation no longer exists, reconfigure pod after removing the es URI"""
         self._stored.elasticsearch_uri = str()
+        self._configure_pod()
+
+    def _on_mongodb_relation_changed(self, event):
+        """Get the relation data from the relation and save to stored variable."""
+        # skip if unit is not leader
+        if not self.unit.is_leader():
+            return
+
+        data = event.relation.data[event.unit]
+        mongodb_uri = data.get("standalone_uri")
+        port = data.get("port")
+        if mongodb_uri is None or port is None:
+            logger.warning("No port or mongodb_uri in MondoDB relation data")
+            return
+
+        # if we have the data we need, get the information
+        self._stored.mongodb_uri = "{}:{}".format(mongodb_uri, port,)
+
+        # configure the pod spec
+        self._configure_pod()
+
+    def _on_mongodb_relation_broken(self, _):
+        """If the relation no longer exists, reconfigure pod after removing the es URI"""
+        self._stored.mongodb_uri = str()
         self._configure_pod()
 
     def _build_pod_spec(self):
