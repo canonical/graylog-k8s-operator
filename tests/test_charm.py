@@ -36,17 +36,22 @@ class TestCharm(unittest.TestCase):
         # add the elasticsearch relation
         rel_id = self.harness.add_relation('elasticsearch', 'elasticsearch')
         self.harness.add_relation_unit(rel_id, 'elasticsearch/0')
-
+        rel = self.harness.model.get_relation('elasticsearch')
         # add data to the unit
         rel_data = {
             'ingress-address': '10.183.1.2',
             'port': 9200,
         }
         self.harness.update_relation_data(rel_id, 'elasticsearch/0', rel_data)
+        self.assertTrue(self.harness.charm.has_elasticsearch)
 
         # test that elasticsearch-uri properly made it to the _stored variable
         expected_uri = 'http://10.183.1.2:9200'
         self.assertEqual(expected_uri, self.harness.charm._stored.elasticsearch_uri)
+
+        # now emit the relation broken event and make sure the _stored variable is cleared
+        self.harness.charm.on.elasticsearch_relation_broken.emit(rel)
+        self.assertEqual(str(), self.harness.charm._stored.elasticsearch_uri)
 
     def test_mounted_server_conf_contents(self):
         self.harness.set_leader(True)
@@ -63,6 +68,7 @@ class TestCharm(unittest.TestCase):
             'port': 9200,
         }
         self.harness.update_relation_data(es_rel_id, 'elasticsearch/0', es_rel_data)
+        self.assertTrue(self.harness.charm.has_elasticsearch)
 
         # test that the server.conf file contains the correct information
         expected_server_conf = textwrap.dedent("""\
