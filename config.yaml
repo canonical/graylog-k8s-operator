@@ -8,3 +8,7 @@ option:
     type: int
     default: 9000
     description: Port used by Graylog for the web interface
+  admin-password:
+    type: string
+    default: ''
+    description: The password to log into the web console.
