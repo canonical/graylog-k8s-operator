@@ -34,7 +34,12 @@ class GraylogCharm(CharmBase):
             self.on['elasticsearch'].relation_broken,
             self._on_elasticsearch_relation_broken
         )
-
+        self.framework.observe(
+            self.on["mongodb"].relation_changed, self._on_mongodb_relation_changed
+        )
+        self.framework.observe(
+            self.on["mongodb"].relation_broken, self._on_mongodb_relation_broken
+        )
         # initialized stored variables
         # TODO: test whether we can just pass the {ingress-address}:{port} string
         #       from Elasticsearch to Graylog or if we need to send multiple hosts
