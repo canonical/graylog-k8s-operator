@@ -30,6 +30,10 @@ class GraylogCharm(CharmBase):
             self.on['elasticsearch'].relation_changed,
             self._on_elasticsearch_relation_changed
         )
+        self.framework.observe(
+            self.on['elasticsearch'].relation_broken,
+            self._on_elasticsearch_relation_broken
+        )
 
         # initialized stored variables
         # TODO: test whether we can just pass the {ingress-address}:{port} string
@@ -39,7 +43,7 @@ class GraylogCharm(CharmBase):
 
     @property
     def has_elasticsearch(self):
-        if self._stored.elasticsearch:
+        if self._stored.elasticsearch_uri:
             return True
         else:
             return False
@@ -70,6 +74,11 @@ class GraylogCharm(CharmBase):
         )
 
         # configure the pod spec
+        self._configure_pod()
+
+    def _on_elasticsearch_relation_broken(self, _):
+        """If the relation no longer exists, reconfigure pod after removing the es URI"""
+        self._stored.elasticsearch_uri = str()
         self._configure_pod()
 
     def _build_pod_spec(self):
