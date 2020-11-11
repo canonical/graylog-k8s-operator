@@ -2,8 +2,10 @@
 # Copyright 2020 Canonical Ltd.
 # See LICENSE file for licensing details.
 
+import hashlib
 import logging
-import textwrap
+import random
+import string
 
 from oci_image import OCIImageResource, OCIImageResourceError
 from ops.charm import CharmBase
@@ -25,6 +27,7 @@ class GraylogCharm(CharmBase):
 
         # event observations
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+        self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.stop, self._on_stop)
         self.framework.observe(
             self.on['elasticsearch'].relation_changed,
@@ -44,7 +47,21 @@ class GraylogCharm(CharmBase):
         # TODO: test whether we can just pass the {ingress-address}:{port} string
         #       from Elasticsearch to Graylog or if we need to send multiple hosts
         #       Hypothesis: just the ingress is fine
-        self._stored.set_default(elasticsearch_uri=str)  # connection str for elasticsearch
+        self._stored.set_default(elasticsearch_uri=str())  # connection str for elasticsearch
+        self._stored.set_default(mongodb_uri=str())  # connection info for mongodb
+        self._stored.set_default(password_secret=str())
+
+    @property
+    def bind_address(self):
+        """The HTTP bind address used for the web interface"""
+        addr = str(self.model.get_binding('graylog').network.ingress_address)
+        port = self.model.config['port']
+        return '{}:{}'.format(addr, port)
+
+    @property
+    def publish_uri(self):
+        """Web interface listen URI"""
+        return 'http://{}/'.format(self.bind_address)
 
     @property
     def has_elasticsearch(self):
@@ -53,7 +70,17 @@ class GraylogCharm(CharmBase):
         else:
             return False
 
+    @property
+    def has_mongodb(self):
+        if self._stored.mongodb_uri:
+            return True
+        else:
+            return False
+
     def _on_config_changed(self, _):
+        self._configure_pod()
+
+    def _on_update_status(self, _):
         self._configure_pod()
 
     def _on_stop(self, _):
@@ -83,6 +110,7 @@ class GraylogCharm(CharmBase):
 
     def _on_elasticsearch_relation_broken(self, _):
         """If the relation no longer exists, reconfigure pod after removing the es URI"""
+        logger.warning('Removing elasticsearch_uri from _stored')
         self._stored.elasticsearch_uri = str()
         self._configure_pod()
 
@@ -93,22 +121,42 @@ class GraylogCharm(CharmBase):
             return
 
         data = event.relation.data[event.unit]
-        mongodb_uri = data.get("standalone_uri")
-        port = data.get("port")
-        if mongodb_uri is None or port is None:
-            logger.warning("No port or mongodb_uri in MondoDB relation data")
+        mongodb_uri = data.get("replica_set_uri")
+        mongodb_rs_name = data.get('replica_set_name')
+        if mongodb_uri is None or mongodb_rs_name is None:
+            logger.warning("No replica_set_uri or replica_set_name in MongoDB relation data")
             return
-
         # if we have the data we need, get the information
-        self._stored.mongodb_uri = "{}:{}".format(mongodb_uri, port,)
+        self._stored.mongodb_uri = '{}graylog?replicaSet={}'.format(mongodb_uri, mongodb_rs_name)
 
         # configure the pod spec
         self._configure_pod()
 
     def _on_mongodb_relation_broken(self, _):
         """If the relation no longer exists, reconfigure pod after removing the es URI"""
+        logger.warning('Removing mongodb_uri from _stored')
         self._stored.mongodb_uri = str()
         self._configure_pod()
+
+    def _password_secret(self, n=96):
+        """The secret of size n used to encrypt/salt the Graylog password
+
+        Returns the already existing secret if it exists, otherwise, generate one
+        """
+        if self._stored.password_secret:
+            return self._stored.password_secret
+
+        # TODO: is this how we want to generate random strings?
+        # generate a random secret that will be used for the life of this charm
+        chars = string.ascii_letters + string.digits
+        secret = ''.join(random.choice(chars) for _ in range(n))
+        self._stored.password_secret = secret
+
+        return secret
+
+    def _password_hash(self):
+        """SHA256 hash of the root password"""
+        return hashlib.sha256(self.model.config['admin-password'].encode()).hexdigest()
 
     def _build_pod_spec(self):
         config = self.model.config
@@ -131,21 +179,15 @@ class GraylogCharm(CharmBase):
                     'containerPort': config['port'],
                     'protocol': 'TCP'
                 }],
-                'volumeConfig': [{
-                    'name': 'config',
-                    'mountPath': '/etc/graylog/server',
-                    'files': [{
-                        'path': 'server.conf',
-                        'content': textwrap.dedent("""\
-                            is_master = true
-                            password_secret = {}
-                            elasticsearch_hosts = {}
-                            """.format(
-                                config['admin-password'],
-                                self._stored.elasticsearch_uri,
-                        ))
-                    }],
-                }],
+                'envConfig': {
+                    'GRAYLOG_IS_MASTER': True,
+                    'GRAYLOG_PASSWORD_SECRET': self._password_secret(),
+                    'GRAYLOG_ROOT_PASSWORD_SHA2': self._password_hash(),
+                    'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
+                    'GRAYLOG_HTTP_PUBLISH_URI': self.publish_uri,
+                    'GRAYLOG_ELASTICSEARCH_HOSTS': self._stored.elasticsearch_uri,
+                    'GRAYLOG_MONGODB_URI': self._stored.mongodb_uri,
+                }
             }]
         }
 
@@ -155,6 +197,13 @@ class GraylogCharm(CharmBase):
         """Configure the K8s pod spec for Graylog."""
         if not self.unit.is_leader():
             self.unit.status = ActiveStatus()
+            return
+
+        # make sure we have a valid mongo and elasticsearch relation
+        if not self.has_mongodb or not self.has_elasticsearch:
+            logger.warning('Need both mongodb and Elasticsearch relation for '
+                           'Graylog to function properly. Blocking.')
+            self.unit.status = BlockedStatus('Need mongodb and Elasticsearch relations.')
             return
 
         spec = self._build_pod_spec()
