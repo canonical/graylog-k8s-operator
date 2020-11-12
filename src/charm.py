@@ -54,7 +54,8 @@ class GraylogCharm(CharmBase):
     @property
     def bind_address(self):
         """The HTTP bind address used for the web interface"""
-        addr = str(self.model.get_binding('graylog').network.ingress_address)
+        # TODO: come up with a more consistent way of doing this
+        addr = 'graylog-0.graylog-endpoints'
         port = self.model.config['port']
         return '{}:{}'.format(addr, port)
 
@@ -186,6 +187,7 @@ class GraylogCharm(CharmBase):
                     'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
                     'GRAYLOG_HTTP_PUBLISH_URI': self.publish_uri,
                     'GRAYLOG_ELASTICSEARCH_HOSTS': self._stored.elasticsearch_uri,
+                    'GRAYLOG_ELASTICSEARCH_DISCOVERY_ENABLED': True,
                     'GRAYLOG_MONGODB_URI': self._stored.mongodb_uri,
                 }
             }]
