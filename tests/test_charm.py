@@ -24,10 +24,15 @@ class TestCharm(unittest.TestCase):
         # patches
         self.mock_bind_address = \
             mock.patch('charm.GraylogCharm.bind_address', new_callable=mock.PropertyMock)
+        self.mock_external_uri = \
+            mock.patch('charm.GraylogCharm.external_uri', new_callable=mock.PropertyMock)
+
         self.mock_bind_address.start()
+        self.mock_external_uri.start()
 
         # cleanup
         self.addCleanup(self.mock_bind_address.stop)
+        self.addCleanup(self.mock_external_uri.stop)
 
     def test_pod_spec_port(self):
         self.harness.set_leader(True)
