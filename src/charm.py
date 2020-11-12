@@ -44,9 +44,6 @@ class GraylogCharm(CharmBase):
             self.on["mongodb"].relation_broken, self._on_mongodb_relation_broken
         )
         # initialized stored variables
-        # TODO: test whether we can just pass the {ingress-address}:{port} string
-        #       from Elasticsearch to Graylog or if we need to send multiple hosts
-        #       Hypothesis: just the ingress is fine
         self._stored.set_default(elasticsearch_uri=str())  # connection str for elasticsearch
         self._stored.set_default(mongodb_uri=str())  # connection info for mongodb
         self._stored.set_default(password_secret=str())
@@ -63,6 +60,13 @@ class GraylogCharm(CharmBase):
     def publish_uri(self):
         """Web interface listen URI"""
         return 'http://{}/'.format(self.bind_address)
+
+    @property
+    def external_uri(self):
+        """Ingress address of the Graylog application"""
+        ingress = str(self.model.get_binding('graylog').network.ingress_address)
+        port = self.model.config['port']
+        return 'http://{}:{}/'.format(ingress, port)
 
     @property
     def has_elasticsearch(self):
@@ -186,9 +190,20 @@ class GraylogCharm(CharmBase):
                     'GRAYLOG_ROOT_PASSWORD_SHA2': self._password_hash(),
                     'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
                     'GRAYLOG_HTTP_PUBLISH_URI': self.publish_uri,
+                    'GRAYLOG_HTTP_EXTERNAL_URI': self.external_uri,
                     'GRAYLOG_ELASTICSEARCH_HOSTS': self._stored.elasticsearch_uri,
                     'GRAYLOG_ELASTICSEARCH_DISCOVERY_ENABLED': True,
                     'GRAYLOG_MONGODB_URI': self._stored.mongodb_uri,
+                },
+                'kubernetes': {
+                    'readinessProbe': {
+                        'httpGet': {
+                            'path': '/api/system/lbstatus',
+                            'port': config['port'],
+                        },
+                        'initialDelaySeconds': 30,
+                        'timeoutSeconds': 10,
+                    }
                 }
             }]
         }
