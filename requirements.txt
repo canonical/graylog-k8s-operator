@@ -1,1 +1,2 @@
 ops
+git+https://github.com/justinmclark/resource-oci-image/@301bbc80927f989bbfaac5e951b6313bcd9ac105#egg=oci-image

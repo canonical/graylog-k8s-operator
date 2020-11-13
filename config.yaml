@@ -1,5 +1,11 @@
 # Copyright 2020 Canonical Ltd.
 # See LICENSE file for licensing details.
-#
-# This is only an example, and you should edit to suit your needs.
-# If you don't need config, you can remove the file entirely.
+options:
+  port:
+    type: int
+    default: 9000
+    description: Port used by Graylog for the web interface
+  admin-password:
+    type: string
+    default: ''
+    description: The password to log into the web console.
