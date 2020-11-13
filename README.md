@@ -2,7 +2,7 @@
 
 ## Description
 
-Graylog operator for ingesting logs.
+Graylog operator for ingesting logs written for Juju and the Operator Framework. Graylog is a leading centralized log management solution built to open standards for capturing, storing, and enabling real-time analysis of terabytes of machine data.
 
 ## Usage
 
@@ -19,7 +19,7 @@ snap install charmcraft
 snap install juju --classic
 ```
 
-Initial setup (ensure microk8s is a clean slate with `microk8s.reset` or a fresh install with `snap install microk8s --classic`:
+Initial setup (ensure microk8s is a clean slate with `microk8s.reset` or a fresh install with `snap install microk8s --classic`):
 ```bash
 microk8s.enable dns storage registry dashboard
 juju bootstrap microk8s mk8s
@@ -32,11 +32,33 @@ Deploy Graylog on its own:
 git clone git@github.com:canonical/graylog-operator.git
 cd graylog-operator
 charmcraft build
-juju deploy ./graylog.charm --resouce graylog-image=graylog/graylog:3.3.8-1
+juju deploy ./graylog.charm --config admin-password={CHOOSE_PASSWORD} --resource graylog-image=graylog/graylog:3.3.8-1
+cd ..
 ```
 
+Deploy the MongoDB and Elasticsearch dependencies
+```bash
+# mongodb
+git clone git@github.com:canonical/mongodb-operator.git
+cd mongodb-operator
+charmcraft build
+juju deploy ./mongodb.charm --resource mongodb-image=mongo:4.4.1 --num-units=3
+cd ..
 
-### Scale Out Usage
+# elasticsearch
+git clone git@github.com:canonical/elasticsearch-operator.git
+cd elasticsearch-operator
+charmcraft build
+charmcraft build && juju deploy ./elasticsearch.charm
+```
+
+Relate Graylog to MongoDB and Elasticsearch so automatic configuration can take place
+```bash
+juju add-relation graylog mongodb
+juju add-relation graylog elasticsearch
+```
+
+Use `watch -c juju status --color` to wait until everything has settled and is active and then visit: `{GRAYLOG_APP_IP}:9000` in your browser.
 
 ...
 
