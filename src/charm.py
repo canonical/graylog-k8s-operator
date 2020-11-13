@@ -50,20 +50,13 @@ class GraylogCharm(CharmBase):
 
     @property
     def bind_address(self):
-        """The HTTP bind address used for the web interface"""
-        # TODO: come up with a more consistent way of doing this
-        addr = 'graylog-0.graylog-endpoints'
+        """Bind address used for http_bind_address config option"""
         port = self.model.config['port']
-        return '{}:{}'.format(addr, port)
-
-    @property
-    def publish_uri(self):
-        """Web interface listen URI"""
-        return 'http://{}/'.format(self.bind_address)
+        return '0.0.0.0:{}'.format(port)
 
     @property
     def external_uri(self):
-        """Ingress address of the Graylog application"""
+        """Public URI used in http_publish_uri and http_external_uri config options"""
         ingress = str(self.model.get_binding('graylog').network.ingress_address)
         port = self.model.config['port']
         return 'http://{}:{}/'.format(ingress, port)
@@ -189,20 +182,28 @@ class GraylogCharm(CharmBase):
                     'GRAYLOG_PASSWORD_SECRET': self._password_secret(),
                     'GRAYLOG_ROOT_PASSWORD_SHA2': self._password_hash(),
                     'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
-                    'GRAYLOG_HTTP_PUBLISH_URI': self.publish_uri,
+                    'GRAYLOG_HTTP_PUBLISH_URI': self.external_uri,
                     'GRAYLOG_HTTP_EXTERNAL_URI': self.external_uri,
                     'GRAYLOG_ELASTICSEARCH_HOSTS': self._stored.elasticsearch_uri,
                     'GRAYLOG_ELASTICSEARCH_DISCOVERY_ENABLED': True,
                     'GRAYLOG_MONGODB_URI': self._stored.mongodb_uri,
                 },
                 'kubernetes': {
+                    'livenessProbe': {
+                        'httpGet': {
+                            'path': '/api/system/lbstatus',
+                            'port': config['port'],
+                        },
+                        'initialDelaySeconds': 60,
+                        'timeoutSeconds': 5,
+                    },
                     'readinessProbe': {
                         'httpGet': {
                             'path': '/api/system/lbstatus',
                             'port': config['port'],
                         },
-                        'initialDelaySeconds': 30,
-                        'timeoutSeconds': 10,
+                        'initialDelaySeconds': 60,
+                        'timeoutSeconds': 5,
                     }
                 }
             }]
