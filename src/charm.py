@@ -162,7 +162,6 @@ class GraylogCharm(CharmBase):
         Returns a boolean indicating whether the check passed or not.
         """
         config = self.model.config
-        print(config)
 
         # check for admin password
         if not config['admin-password']:
