@@ -156,6 +156,22 @@ class GraylogCharm(CharmBase):
         """SHA256 hash of the root password"""
         return hashlib.sha256(self.model.config['admin-password'].encode()).hexdigest()
 
+    def _check_config(self) -> bool:
+        """Check the required configuration options
+
+        Returns a boolean indicating whether the check passed or not.
+        """
+        config = self.model.config
+        print(config)
+
+        # check for admin password
+        if not config['admin-password']:
+            logger.error('Need admin-password config option before setting pod spec.')
+            self.unit.status = BlockedStatus("Need 'admin-password' config option.")
+            return False
+
+        return True
+
     def _build_pod_spec(self):
         config = self.model.config
 
@@ -215,6 +231,9 @@ class GraylogCharm(CharmBase):
         """Configure the K8s pod spec for Graylog."""
         if not self.unit.is_leader():
             self.unit.status = ActiveStatus()
+            return
+
+        if not self._check_config():
             return
 
         # make sure we have a valid mongo and elasticsearch relation
