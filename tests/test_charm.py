@@ -34,7 +34,7 @@ class TestCharm(unittest.TestCase):
         self.addCleanup(self.mock_bind_address.stop)
         self.addCleanup(self.mock_external_uri.stop)
 
-    def test_pod_spec_port(self):
+    def test_pod_specs(self):
         self.harness.set_leader(True)
         # pretend to have mongo and elasticsearch
         self.harness.charm._stored.mongodb_uri = 'mongo://test_uri/'
@@ -47,6 +47,19 @@ class TestCharm(unittest.TestCase):
         expected_port = 9000
         actual_port = spec['containers'][0]['ports'][0]['containerPort']
         self.assertEqual(expected_port, actual_port)
+
+        expected_spec_version = 3
+        actual_spec_version = spec["version"]
+        self.assertEqual(actual_spec_version, expected_spec_version)
+
+        expected_rediness_path = "/api/system/lbstatus"
+        actual_rediness_path = spec["containers"][0]["kubernetes"]["readinessProbe"][
+            "httpGet"]["path"]
+        self.assertEqual(actual_rediness_path, expected_rediness_path)
+
+        actual_rediness_port = spec["containers"][0]["kubernetes"]["readinessProbe"][
+            "httpGet"]["port"]
+        self.assertEqual(actual_rediness_port, expected_port)
 
     def test_elasticsearch_and_mongodb_conn_strings(self):
         self.harness.set_leader(True)
