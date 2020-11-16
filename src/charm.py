@@ -7,7 +7,6 @@ import logging
 import random
 import string
 
-from oci_image import OCIImageResource, OCIImageResourceError
 from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, MaintenanceStatus, BlockedStatus
@@ -21,9 +20,6 @@ class GraylogCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-
-        # initialize image resource
-        self.image = OCIImageResource(self, 'graylog-image')
 
         # event observations
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -159,20 +155,12 @@ class GraylogCharm(CharmBase):
     def _build_pod_spec(self):
         config = self.model.config
 
-        # fetch OCI image resource
-        try:
-            image_info = self.image.fetch()
-        except OCIImageResourceError:
-            logging.exception('An error occurred while fetching the image info')
-            self.unit.status = BlockedStatus('Error fetching image information')
-            return {}
-
         # baseline pod spec
         spec = {
             'version': 3,
             'containers': [{
                 'name': self.app.name,  # self.app.name is defined in metadata.yaml
-                'imageDetails': image_info,
+                'imageDetails': {"imagePath": "graylog/graylog:3.3.8-1"},
                 'ports': [{
                     'containerPort': config['port'],
                     'protocol': 'TCP'

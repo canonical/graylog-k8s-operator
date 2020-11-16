@@ -2,7 +2,7 @@
 # See LICENSE file for licensing details.
 name: graylog
 summary: |
-  Kubernetes charm for Graylog. 
+  Kubernetes charm for Graylog.
 tags:
   - observability
   - lma
@@ -26,9 +26,3 @@ requires:
   mongodb:
     interface: mongodb
     limit: 1
-resources:
-  graylog-image:
-    type: oci-image
-    description: upstream docker image for Graylog
-    auto-fetch: true
-    upstream-source: 'graylog/graylog:3.3.8-1'
