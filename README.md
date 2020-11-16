@@ -49,7 +49,7 @@ cd ..
 git clone git@github.com:canonical/elasticsearch-operator.git
 cd elasticsearch-operator
 charmcraft build
-charmcraft build && juju deploy ./elasticsearch.charm
+juju deploy ./elasticsearch.charm
 ```
 
 Relate Graylog to MongoDB and Elasticsearch so automatic configuration can take place
