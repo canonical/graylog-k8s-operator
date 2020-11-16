@@ -4,6 +4,7 @@
 import unittest
 from unittest import mock
 
+from ops.model import BlockedStatus
 from ops.testing import Harness
 from charm import GraylogCharm
 
@@ -94,3 +95,15 @@ class TestCharm(unittest.TestCase):
             msg = 'WARNING:charm:Need both mongodb and Elasticsearch ' \
                   'relation for Graylog to function properly. Blocking.'
             self.assertEqual(sorted(logger.output), [msg])
+
+    def test_check_config_with_missing_option(self):
+        self.harness.set_leader(True)
+        missing_password_config = {'port': 9000, 'admin-password': ''}
+        with self.assertLogs(level='WARNING') as logger:
+            self.harness.update_config(missing_password_config)
+            msg = 'ERROR:charm:Need admin-password config option before setting pod spec.'
+            self.assertEqual(sorted(logger.output), [msg])
+            self.assertEqual(
+                self.harness.model.unit.status,
+                BlockedStatus("Need 'admin-password' config option.")
+            )
