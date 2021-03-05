@@ -237,9 +237,9 @@ class GraylogCharm(CharmBase):
 
         # make sure we have a valid mongo and elasticsearch relation
         if not self.has_mongodb or not self.has_elasticsearch:
-            logger.warning('Need both mongodb and Elasticsearch relation for '
+            logger.warning('Need both MongoDB and Elasticsearch relation for '
                            'Graylog to function properly. Blocking.')
-            self.unit.status = BlockedStatus('Need mongodb and Elasticsearch relations.')
+            self.unit.status = BlockedStatus('Need MongoDB and Elasticsearch relations.')
             return
 
         spec = self._build_pod_spec()

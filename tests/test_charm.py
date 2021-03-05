@@ -92,7 +92,7 @@ class TestCharm(unittest.TestCase):
         self.harness.set_leader(True)
         with self.assertLogs(level='WARNING') as logger:
             self.harness.update_config(BASE_CONFIG)
-            msg = 'WARNING:charm:Need both mongodb and Elasticsearch ' \
+            msg = 'WARNING:charm:Need both MongoDB and Elasticsearch ' \
                   'relation for Graylog to function properly. Blocking.'
             self.assertEqual(sorted(logger.output), [msg])
 
