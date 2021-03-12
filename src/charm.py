@@ -54,12 +54,15 @@ class GraylogCharm(CharmBase):
         port = self.model.config['port']
         return '0.0.0.0:{}'.format(port)
 
-    @property
-    def external_uri(self):
+    def external_uri(self, event):
         """Public URI used in http_publish_uri and http_external_uri config options"""
-        ingress = str(self.model.get_binding('graylog').network.ingress_address)
-        port = self.model.config['port']
-        return 'http://{}:{}/'.format(ingress, port)
+        try:
+            ingress = str(self.model.get_binding('graylog').network.ingress_address)
+            port = self.model.config['port']
+            return 'http://{}:{}/'.format(ingress, port)
+        except TypeError:
+            event.defer()
+            return "http://"
 
     @property
     def has_elasticsearch(self):
@@ -75,11 +78,11 @@ class GraylogCharm(CharmBase):
         else:
             return False
 
-    def _on_config_changed(self, _):
-        self._configure_pod()
+    def _on_config_changed(self, event):
+        self._configure_pod(event)
 
-    def _on_update_status(self, _):
-        self._configure_pod()
+    def _on_update_status(self, event):
+        self._configure_pod(event)
 
     def _on_stop(self, _):
         self.unit.status = MaintenanceStatus('Pod is terminating.')
@@ -104,13 +107,13 @@ class GraylogCharm(CharmBase):
         )
 
         # configure the pod spec
-        self._configure_pod()
+        self._configure_pod(event)
 
-    def _on_elasticsearch_relation_broken(self, _):
+    def _on_elasticsearch_relation_broken(self, event):
         """If the relation no longer exists, reconfigure pod after removing the es URI"""
         logger.warning('Removing elasticsearch_uri from _stored')
         self._stored.elasticsearch_uri = str()
-        self._configure_pod()
+        self._configure_pod(event)
 
     def _on_mongodb_relation_changed(self, event):
         """Get the relation data from the relation and save to stored variable."""
@@ -128,13 +131,13 @@ class GraylogCharm(CharmBase):
         self._stored.mongodb_uri = '{}graylog?replicaSet={}'.format(mongodb_uri, mongodb_rs_name)
 
         # configure the pod spec
-        self._configure_pod()
+        self._configure_pod(event)
 
-    def _on_mongodb_relation_broken(self, _):
+    def _on_mongodb_relation_broken(self, event):
         """If the relation no longer exists, reconfigure pod after removing the es URI"""
         logger.warning('Removing mongodb_uri from _stored')
         self._stored.mongodb_uri = str()
-        self._configure_pod()
+        self._configure_pod(event)
 
     def _password_secret(self, n=96):
         """The secret of size n used to encrypt/salt the Graylog password
@@ -171,7 +174,7 @@ class GraylogCharm(CharmBase):
 
         return True
 
-    def _build_pod_spec(self):
+    def _build_pod_spec(self, event):
         config = self.model.config
 
         # fetch OCI image resource
@@ -197,8 +200,8 @@ class GraylogCharm(CharmBase):
                     'GRAYLOG_PASSWORD_SECRET': self._password_secret(),
                     'GRAYLOG_ROOT_PASSWORD_SHA2': self._password_hash(),
                     'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
-                    'GRAYLOG_HTTP_PUBLISH_URI': self.external_uri,
-                    'GRAYLOG_HTTP_EXTERNAL_URI': self.external_uri,
+                    'GRAYLOG_HTTP_PUBLISH_URI': self.external_uri(event),
+                    'GRAYLOG_HTTP_EXTERNAL_URI': self.external_uri(event),
                     'GRAYLOG_ELASTICSEARCH_HOSTS': self._stored.elasticsearch_uri,
                     'GRAYLOG_ELASTICSEARCH_DISCOVERY_ENABLED': True,
                     'GRAYLOG_MONGODB_URI': self._stored.mongodb_uri,
@@ -226,8 +229,9 @@ class GraylogCharm(CharmBase):
 
         return spec
 
-    def _configure_pod(self):
+    def _configure_pod(self, event):
         """Configure the K8s pod spec for Graylog."""
+
         if not self.unit.is_leader():
             self.unit.status = ActiveStatus()
             return
@@ -242,7 +246,7 @@ class GraylogCharm(CharmBase):
             self.unit.status = BlockedStatus('Need mongodb and Elasticsearch relations.')
             return
 
-        spec = self._build_pod_spec()
+        spec = self._build_pod_spec(event)
         if not spec:
             return
         self.model.pod.set_spec(spec)
