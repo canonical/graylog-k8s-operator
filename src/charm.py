@@ -7,6 +7,7 @@ import logging
 import random
 import string
 
+from custom_exceptions import IngressAddressUnavailableError
 from oci_image import OCIImageResource, OCIImageResourceError
 from ops.charm import CharmBase
 from ops.main import main
@@ -14,6 +15,7 @@ from ops.model import ActiveStatus, MaintenanceStatus, BlockedStatus
 from ops.framework import StoredState
 
 logger = logging.getLogger(__name__)
+PEER = "graylog"
 
 
 class GraylogCharm(CharmBase):
@@ -54,15 +56,47 @@ class GraylogCharm(CharmBase):
         port = self.model.config['port']
         return '0.0.0.0:{}'.format(port)
 
-    def external_uri(self, event):
-        """Public URI used in http_publish_uri and http_external_uri config options"""
+    @property
+    def ingress_address(self) -> str:
+        """Graylog's ingress address"""
         try:
-            ingress = str(self.model.get_binding('graylog').network.ingress_address)
-            port = self.model.config['port']
-            return 'http://{}:{}/'.format(ingress, port)
+            logger.debug(
+                "Getting ingress_address: %s",
+                self.model.get_binding(PEER).network.ingress_address,
+            )
+            return str(self.model.get_binding(PEER).network.ingress_address)
         except TypeError:
-            event.defer()
-            return "http://"
+            raise IngressAddressUnavailableError
+
+    @property
+    def ingress_port(self) -> int:
+        """Graylog's ingress port"""
+        logger.debug(
+            "Getting ingress_port: %s", self.model.config["port"]
+        )
+        return self.model.config["port"]
+
+    @property
+    def external_uri(self) -> str:
+        """
+        Public URI used in http_publish_uri and
+        http_external_uri config options
+        """
+        try:
+            external_uri = "http://{}:{}/".format(
+                self.ingress_address, self.ingress_port
+            )
+            logger.debug("Getting external_uri: %s", external_uri)
+        except IngressAddressUnavailableError as ex:
+            # Set external_uri as an empty string, if set to None
+            # we get the following error:
+            #
+            # parsing unit spec for graylog: processing container specs for app
+            # "graylog": config "GRAYLOG_HTTP_EXTERNAL_URI" with type <nil> not support
+            external_uri = ""
+            logger.warning(ex.message)
+
+        return external_uri
 
     @property
     def has_elasticsearch(self):
@@ -88,7 +122,9 @@ class GraylogCharm(CharmBase):
         self.unit.status = MaintenanceStatus('Pod is terminating.')
 
     def _on_elasticsearch_relation_changed(self, event):
-        """Get the relation data from the relation and save to stored variable."""
+        """
+        Get the relation data from the relation and save to stored variable.
+        """
         # skip if unit is not leader
         if not self.unit.is_leader():
             return
@@ -185,6 +221,7 @@ class GraylogCharm(CharmBase):
             self.unit.status = BlockedStatus('Error fetching image information')
             return {}
 
+        external_uri = self.external_uri
         # baseline pod spec
         spec = {
             'version': 3,
@@ -200,8 +237,8 @@ class GraylogCharm(CharmBase):
                     'GRAYLOG_PASSWORD_SECRET': self._password_secret(),
                     'GRAYLOG_ROOT_PASSWORD_SHA2': self._password_hash(),
                     'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
-                    'GRAYLOG_HTTP_PUBLISH_URI': self.external_uri(event),
-                    'GRAYLOG_HTTP_EXTERNAL_URI': self.external_uri(event),
+                    'GRAYLOG_HTTP_PUBLISH_URI': external_uri,
+                    'GRAYLOG_HTTP_EXTERNAL_URI': external_uri,
                     'GRAYLOG_ELASTICSEARCH_HOSTS': self._stored.elasticsearch_uri,
                     'GRAYLOG_ELASTICSEARCH_DISCOVERY_ENABLED': True,
                     'GRAYLOG_MONGODB_URI': self._stored.mongodb_uri,
