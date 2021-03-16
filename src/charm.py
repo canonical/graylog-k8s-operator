@@ -112,11 +112,11 @@ class GraylogCharm(CharmBase):
         else:
             return False
 
-    def _on_config_changed(self, event):
-        self._configure_pod(event)
+    def _on_config_changed(self, _):
+        self._configure_pod()
 
-    def _on_update_status(self, event):
-        self._configure_pod(event)
+    def _on_update_status(self, _):
+        self._configure_pod()
 
     def _on_stop(self, _):
         self.unit.status = MaintenanceStatus('Pod is terminating.')
@@ -143,13 +143,13 @@ class GraylogCharm(CharmBase):
         )
 
         # configure the pod spec
-        self._configure_pod(event)
+        self._configure_pod()
 
-    def _on_elasticsearch_relation_broken(self, event):
+    def _on_elasticsearch_relation_broken(self, _):
         """If the relation no longer exists, reconfigure pod after removing the es URI"""
         logger.warning('Removing elasticsearch_uri from _stored')
         self._stored.elasticsearch_uri = str()
-        self._configure_pod(event)
+        self._configure_pod()
 
     def _on_mongodb_relation_changed(self, event):
         """Get the relation data from the relation and save to stored variable."""
@@ -167,13 +167,13 @@ class GraylogCharm(CharmBase):
         self._stored.mongodb_uri = '{}graylog?replicaSet={}'.format(mongodb_uri, mongodb_rs_name)
 
         # configure the pod spec
-        self._configure_pod(event)
+        self._configure_pod()
 
-    def _on_mongodb_relation_broken(self, event):
+    def _on_mongodb_relation_broken(self, _):
         """If the relation no longer exists, reconfigure pod after removing the es URI"""
         logger.warning('Removing mongodb_uri from _stored')
         self._stored.mongodb_uri = str()
-        self._configure_pod(event)
+        self._configure_pod()
 
     def _password_secret(self, n=96):
         """The secret of size n used to encrypt/salt the Graylog password
@@ -210,7 +210,7 @@ class GraylogCharm(CharmBase):
 
         return True
 
-    def _build_pod_spec(self, event):
+    def _build_pod_spec(self):
         config = self.model.config
 
         # fetch OCI image resource
@@ -266,7 +266,7 @@ class GraylogCharm(CharmBase):
 
         return spec
 
-    def _configure_pod(self, event):
+    def _configure_pod(self):
         """Configure the K8s pod spec for Graylog."""
 
         if not self.unit.is_leader():
@@ -283,7 +283,7 @@ class GraylogCharm(CharmBase):
             self.unit.status = BlockedStatus('Need mongodb and Elasticsearch relations.')
             return
 
-        spec = self._build_pod_spec(event)
+        spec = self._build_pod_spec()
         if not spec:
             return
         self.model.pod.set_spec(spec)
