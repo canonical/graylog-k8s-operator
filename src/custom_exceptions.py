@@ -3,7 +3,7 @@
 # See LICENSE file for licensing details.
 
 """
-This module has custom exceptions for garylog-operator
+This module has custom exceptions for graylog-operator
 Perhaps in the future we can generalise these exceptions to other charms.
 
 Exception: IngressAddressUnavailableError
