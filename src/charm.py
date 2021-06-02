@@ -7,286 +7,146 @@ import logging
 import random
 import string
 
-from custom_exceptions import IngressAddressUnavailableError
-from oci_image import OCIImageResource, OCIImageResourceError
 from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, MaintenanceStatus, BlockedStatus
 from ops.framework import StoredState
 
 logger = logging.getLogger(__name__)
-PEER = "graylog"
-
 
 class GraylogCharm(CharmBase):
     _stored = StoredState()
 
     def __init__(self, *args):
         super().__init__(*args)
-
-        # initialize image resource
-        self.image = OCIImageResource(self, 'graylog-image')
+        self.container = self.unit.get_container("graylog")
 
         # event observations
         self.framework.observe(self.on.config_changed, self._on_config_changed)
-        self.framework.observe(self.on.update_status, self._on_update_status)
         self.framework.observe(self.on.stop, self._on_stop)
-        self.framework.observe(
-            self.on['elasticsearch'].relation_changed,
-            self._on_elasticsearch_relation_changed
+
+        self.framework.observer(
+            self.on["graylog-peers"].relation_joined, self._on_peer_relation_joined
         )
-        self.framework.observe(
-            self.on['elasticsearch'].relation_broken,
-            self._on_elasticsearch_relation_broken
-        )
-        self.framework.observe(
-            self.on["mongodb"].relation_changed, self._on_mongodb_relation_changed
-        )
-        self.framework.observe(
-            self.on["mongodb"].relation_broken, self._on_mongodb_relation_broken
-        )
-        # initialized stored variables
-        self._stored.set_default(elasticsearch_uri=str())  # connection str for elasticsearch
-        self._stored.set_default(mongodb_uri=str())  # connection info for mongodb
-        self._stored.set_default(password_secret=str())
 
-    @property
-    def bind_address(self):
-        """Bind address used for http_bind_address config option"""
-        port = self.model.config['port']
-        return '0.0.0.0:{}'.format(port)
+        self.provider = GraylogProvider(self, "graylog", "graylog", "3.2")
 
-    @property
-    def ingress_address(self) -> str:
-        """Graylog's ingress address"""
-        try:
-            logger.debug(
-                "Getting ingress_address: %s",
-                self.model.get_binding(PEER).network.ingress_address,
-            )
-            return str(self.model.get_binding(PEER).network.ingress_address)
-        except TypeError:
-            raise IngressAddressUnavailableError
+        self.mongodb = MongoDbProvider(self, "mongodb")
+        self.framework.observe(self.mongodb.on["ready"], self._requirement_ready)
 
-    @property
-    def ingress_port(self) -> int:
-        """Graylog's ingress port"""
-        logger.debug(
-            "Getting ingress_port: %s", self.model.config["port"]
-        )
-        return self.model.config["port"]
+        self.elastic = ElasticSearchProvider(self, "elasticsearch", ">=5.0 <7")
+        self.framework.observe(self.elastic.on["ready"], self._requirement_ready)
 
-    @property
-    def external_uri(self) -> str:
-        """
-        Public URI used in http_publish_uri and
-        http_external_uri config options
-        """
-        try:
-            external_uri = "http://{}:{}/".format(
-                self.ingress_address, self.ingress_port
-            )
-            logger.debug("Getting external_uri: %s", external_uri)
-        except IngressAddressUnavailableError as ex:
-            # Set external_uri as an empty string, if set to None
-            # we get the following error:
-            #
-            # parsing unit spec for graylog: processing container specs for app
-            # "graylog": config "GRAYLOG_HTTP_EXTERNAL_URI" with type <nil> not support
-            external_uri = ""
-            logger.warning(ex.message)
+        #self.model.get_binding(PEER).network.ingress_address,
 
-        return external_uri
-
-    @property
-    def has_elasticsearch(self):
-        if self._stored.elasticsearch_uri:
-            return True
-        else:
-            return False
-
-    @property
-    def has_mongodb(self):
-        if self._stored.mongodb_uri:
-            return True
-        else:
-            return False
-
-    def _on_config_changed(self, _):
-        self._configure_pod()
-
-    def _on_update_status(self, _):
+    def _on_config_changed(self, event):
+        self._update_peers()
         self._configure_pod()
 
     def _on_stop(self, _):
         self.unit.status = MaintenanceStatus('Pod is terminating.')
 
-    def _on_elasticsearch_relation_changed(self, event):
-        """
-        Get the relation data from the relation and save to stored variable.
-        """
-        # skip if unit is not leader
-        if not self.unit.is_leader():
-            return
 
-        data = event.relation.data[event.unit]
-        ingress_address = data.get('ingress-address')
-        port = data.get('port')
-        if ingress_address is None or port is None:
-            logger.warning('No port or ingress-address in Elasticsearch relation data')
-            return
+    def _requirement_ready(self, event):
+        self._configure_pod()
 
-        # if we have the data we need, get the information
-        self._stored.elasticsearch_uri = 'http://{}:{}'.format(
-            ingress_address,
-            port,
+    def _update_peers(self):
+        peers_data = self.model.get_relation("graylog-peers").data[self.app]
+        if self.unit.is_leader():
+            if not peers_data["graylog_master"]:
+                peers_data["graylog_master"] = self.unit.name
+
+            if not peers_data["password_secret"]:
+                peers_data["password_secret"] = self._generate_secret()
+
+            if not peers_data["admin_password"]:
+                peers_data["admin_password"] = self._generate_password()
+
+    def _on_peer_relation_joined(self, event):
+        event.relation.data[self.unit].private_address = str(
+            self.model.get_binding(event.relation).network.ingress_address
         )
 
-        # configure the pod spec
-        self._configure_pod()
-
-    def _on_elasticsearch_relation_broken(self, _):
-        """If the relation no longer exists, reconfigure pod after removing the es URI"""
-        logger.warning('Removing elasticsearch_uri from _stored')
-        self._stored.elasticsearch_uri = str()
-        self._configure_pod()
-
-    def _on_mongodb_relation_changed(self, event):
-        """Get the relation data from the relation and save to stored variable."""
-        # skip if unit is not leader
-        if not self.unit.is_leader():
-            return
-
-        data = event.relation.data[event.unit]
-        mongodb_uri = data.get("replica_set_uri")
-        mongodb_rs_name = data.get('replica_set_name')
-        if mongodb_uri is None or mongodb_rs_name is None:
-            logger.warning("No replica_set_uri or replica_set_name in MongoDB relation data")
-            return
-        # if we have the data we need, get the information
-        self._stored.mongodb_uri = '{}graylog?replicaSet={}'.format(mongodb_uri, mongodb_rs_name)
-
-        # configure the pod spec
-        self._configure_pod()
-
-    def _on_mongodb_relation_broken(self, _):
-        """If the relation no longer exists, reconfigure pod after removing the es URI"""
-        logger.warning('Removing mongodb_uri from _stored')
-        self._stored.mongodb_uri = str()
-        self._configure_pod()
-
-    def _password_secret(self, n=96):
+    def _generate_secret(self, n=96):
         """The secret of size n used to encrypt/salt the Graylog password
 
         Returns the already existing secret if it exists, otherwise, generate one
         """
-        if self._stored.password_secret:
-            return self._stored.password_secret
-
         # TODO: is this how we want to generate random strings?
         # generate a random secret that will be used for the life of this charm
         chars = string.ascii_letters + string.digits
         secret = ''.join(random.choice(chars) for _ in range(n))
-        self._stored.password_secret = secret
 
         return secret
 
-    def _password_hash(self):
+    def _generate_password(self):
+        return "strong_password"
+
+    def _hash_password(self, password):
         """SHA256 hash of the root password"""
-        return hashlib.sha256(self.model.config['admin-password'].encode()).hexdigest()
+        return hashlib.sha256(password).hexdigest()
 
-    def _check_config(self) -> bool:
-        """Check the required configuration options
 
-        Returns a boolean indicating whether the check passed or not.
-        """
-        config = self.model.config
+    def _build_pebble_layer(self):
+        elastic_addrs = self.elastic.getClusterInfo()
+        mongodb_addrs = self.mongodb.getClusterInfo()
+        peers_data = self.model.get_relation("graylog-peers").data[self.app]
 
-        # check for admin password
-        if not config['admin-password']:
-            logger.error('Need admin-password config option before setting pod spec.')
-            self.unit.status = BlockedStatus("Need 'admin-password' config option.")
-            return False
-
-        return True
-
-    def _build_pod_spec(self):
-        config = self.model.config
-
-        # fetch OCI image resource
-        try:
-            image_info = self.image.fetch()
-        except OCIImageResourceError:
-            logging.exception('An error occurred while fetching the image info')
-            self.unit.status = BlockedStatus('Error fetching image information')
-            return {}
-
-        external_uri = self.external_uri
-        # baseline pod spec
-        spec = {
-            'version': 3,
-            'containers': [{
-                'name': self.app.name,  # self.app.name is defined in metadata.yaml
-                'imageDetails': image_info,
-                'ports': [{
-                    'containerPort': config['port'],
-                    'protocol': 'TCP'
-                }],
-                'envConfig': {
-                    'GRAYLOG_IS_MASTER': True,
-                    'GRAYLOG_PASSWORD_SECRET': self._password_secret(),
-                    'GRAYLOG_ROOT_PASSWORD_SHA2': self._password_hash(),
-                    'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
-                    'GRAYLOG_HTTP_PUBLISH_URI': external_uri,
-                    'GRAYLOG_HTTP_EXTERNAL_URI': external_uri,
-                    'GRAYLOG_ELASTICSEARCH_HOSTS': self._stored.elasticsearch_uri,
-                    'GRAYLOG_ELASTICSEARCH_DISCOVERY_ENABLED': True,
-                    'GRAYLOG_MONGODB_URI': self._stored.mongodb_uri,
-                },
-                'kubernetes': {
-                    'livenessProbe': {
-                        'httpGet': {
-                            'path': '/api/system/lbstatus',
-                            'port': config['port'],
-                        },
-                        'initialDelaySeconds': 60,
-                        'timeoutSeconds': 5,
+        layer = {
+            "summary" : "Graylog Layer",
+            "description" : "Pebble layer configuration for Graylog",
+            "services" : {
+                "graylog" : {
+                    "override" : "replace",
+                    "summary" : "graylog service",
+                    "command" : "graylog",
+                    "startup" : "enabled",
+                    "environment" : {
+                        'GRAYLOG_IS_MASTER': True,
+                        'GRAYLOG_PASSWORD_SECRET': peers_data["password_secret"],
+                        'GRAYLOG_ROOT_PASSWORD_SHA2': self._hash_password(peers_data["admin_password"]),
+                        'GRAYLOG_HTTP_BIND_ADDRESS': self.bind_address,
+                        'GRAYLOG_HTTP_PUBLISH_URI': self.external_uri,
+                        'GRAYLOG_HTTP_EXTERNAL_URI': self.external_uri,
+                        'GRAYLOG_ELASTICSEARCH_HOSTS': elastic_addrs,
+                        'GRAYLOG_ELASTICSEARCH_DISCOVERY_ENABLED': True,
+                        'GRAYLOG_MONGODB_URI': mongodb_addrs,
                     },
-                    'readinessProbe': {
-                        'httpGet': {
-                            'path': '/api/system/lbstatus',
-                            'port': config['port'],
-                        },
-                        'initialDelaySeconds': 60,
-                        'timeoutSeconds': 5,
-                    }
-                }
-            }]
+                },
+            },
         }
 
-        return spec
+        return layer
 
     def _configure_pod(self):
-        """Configure the K8s pod spec for Graylog."""
+        """Configure the Pebble layer for Graylog."""
 
-        if not self.unit.is_leader():
-            self.unit.status = ActiveStatus()
-            return
-
-        if not self._check_config():
-            return
-
-        # make sure we have a valid mongo and elasticsearch relation
-        if not self.has_mongodb or not self.has_elasticsearch:
+        if not self.mongodb.is_valid():
             logger.warning('Need both MongoDB and Elasticsearch relation for '
                            'Graylog to function properly. Blocking.')
-            self.unit.status = BlockedStatus('Need MongoDB and Elasticsearch relations.')
-            return
+            self.unit.status = BlockedStatus('Missing MongoDB relation')
+            return False
 
-        spec = self._build_pod_spec()
-        if not spec:
-            return
-        self.model.pod.set_spec(spec)
+        if not self.elastic.is_valid():
+            logger.warning('Need both MongoDB and Elasticsearch relation for '
+                           'Graylog to function properly. Blocking.')
+            self.unit.status = BlockedStatus('Missing ElasticSearch relation')
+            return False
+
+        layer = self._build_pebble_layer()
+        if not layer.services.graylog.environment.GRAYLOG_PASSWORD_SECRET:
+            self.unit.status = MaintenanceStatus("Awaiting leader node to set password")
+            return False
+
+        if not layer.service.graylog.environment.GRAYLOG_ELASTICSEARCH_HOSTS:
+            self.unit.status = MaintenanceStatus('Related ElasticSearch not yet ready.')
+            return False
+
+        if not layer.service.graylog.environment.GRAYLOG_MONGODB_URI:
+            self.unit.status = MaintenanceStatus('Related MongoDb not yet ready.')
+            return False
+
+        self.container.add_layer("graylog", layer, combine=True)
         self.unit.status = ActiveStatus()
 
 
